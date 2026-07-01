@@ -1,0 +1,823 @@
+```html
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>10日大資金籌碼雷達</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        twRed: {
+                            50: '#fef2f2',
+                            100: '#fee2e2',
+                            500: '#ef4444',
+                            600: '#dc2626',
+                            700: '#b91c1c',
+                        },
+                        twGreen: {
+                            50: '#f0fdf4',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 隱藏滾動條 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .tap-feedback:active {
+            transform: scale(0.97);
+            opacity: 0.9;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .skeleton {
+            background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col pb-12">
+
+    <!-- 頂部導航欄 -->
+    <header class="sticky top-0 z-40 bg-white border-b border-slate-100 px-4 py-3 shadow-sm">
+        <div class="flex justify-between items-center max-w-md mx-auto w-full">
+            <div class="flex items-center space-x-2">
+                <span class="text-2xl">⚡</span>
+                <div>
+                    <h1 class="font-black text-lg text-slate-900 tracking-tight">10日大資金籌碼雷達</h1>
+                    <p class="text-[10px] text-slate-400">三大法人百萬大資金連續流向監控</p>
+                </div>
+            </div>
+            <div class="flex space-x-2">
+                <!-- 一鍵下載 10 日按鈕 -->
+                <button id="btn-batch" onclick="batchDownloadAll()" class="tap-feedback text-[11px] font-bold bg-slate-900 text-white px-3 py-1.5 rounded-full flex items-center space-x-1 shadow-sm">
+                    <span>⚡ 一鍵掃描10日</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow p-4 max-w-md mx-auto w-full space-y-4">
+        
+        <!-- 頂部 10 日滑動日曆 -->
+        <div class="space-y-1.5">
+            <div class="flex justify-between items-center px-1">
+                <span class="text-xs font-bold text-slate-400">📅 選擇交易日期 (或選10日累計)</span>
+                <span id="cache-status" class="text-[10px] font-medium text-slate-400">已緩存 0/10 天</span>
+            </div>
+            
+            <!-- 水平滾動時間軸 -->
+            <div class="flex space-x-2 overflow-x-auto py-1 no-scrollbar" id="calendar-timeline">
+                <!-- 「10日累計」固定顆粒 -->
+                <button onclick="selectDate('accumulate')" id="date-accumulate" class="tap-feedback shrink-0 px-4 py-2.5 rounded-2xl text-center border transition-all shadow-sm bg-slate-900 border-slate-900 text-white font-bold">
+                    <div class="text-[10px] opacity-80">🔥 籌碼強勢</div>
+                    <div class="text-xs mt-0.5">10日累計榜</div>
+                </button>
+                <!-- 其他 10 日將由 JS 動態生成 -->
+            </div>
+        </div>
+
+        <!-- 篩選卡片 -->
+        <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 space-y-3">
+            <!-- 篩選角色 -->
+            <div class="flex bg-slate-100 p-1 rounded-2xl">
+                <button onclick="switchTab('total')" id="tab-total" class="tap-feedback flex-1 py-2 text-xs font-bold text-center rounded-xl transition-all bg-white text-slate-900 shadow-sm">
+                    👑 法人合計
+                </button>
+                <button onclick="switchTab('foreign')" id="tab-foreign" class="tap-feedback flex-1 py-2 text-xs font-bold text-center rounded-xl text-slate-500 transition-all">
+                    🔥 外資主力
+                </button>
+                <button onclick="switchTab('trust')" id="tab-trust" class="tap-feedback flex-1 py-2 text-xs font-bold text-center rounded-xl text-slate-500 transition-all">
+                    🥦 投信鎖碼
+                </button>
+            </div>
+
+            <!-- 關鍵字搜尋 -->
+            <div class="relative">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </span>
+                <input type="text" id="search-input" placeholder="搜尋股票代號或名稱..." class="w-full py-2 pl-9 pr-4 bg-slate-50 border border-slate-200/80 rounded-xl text-xs focus:outline-none focus:ring-1.5 focus:ring-slate-900 transition-all placeholder:text-slate-400" />
+            </div>
+        </div>
+
+        <!-- 狀態提醒看板 -->
+        <div id="status-panel" class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-3xl p-5 shadow-md relative overflow-hidden">
+            <p id="panel-title" class="text-xs text-twRed-500 font-bold uppercase tracking-wider">正在初始化時間軸...</p>
+            <h3 id="panel-desc" class="text-base font-bold mt-1">選取上方日期即可即時追蹤當日買超</h3>
+            <div class="flex items-center space-x-2 mt-4 text-[10px] bg-white/10 w-fit px-3 py-1.5 rounded-full" id="panel-footer">
+                <span class="w-1.5 h-1.5 rounded-full bg-twRed-500 animate-pulse"></span>
+                <span>資料來源：台灣證券交易所</span>
+            </div>
+        </div>
+
+        <!-- 列表與骨架屏 -->
+        <div>
+            <div class="flex justify-between items-center px-1 mb-2">
+                <span class="text-xs font-bold text-slate-400 tracking-wider" id="list-title">大資金排行</span>
+                <span class="text-xs text-slate-400" id="list-count">共 0 筆</span>
+            </div>
+
+            <!-- 骨架載入效果 -->
+            <div id="loading-view" class="space-y-2.5 hidden">
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 flex items-center justify-between shadow-sm">
+                    <div class="flex items-center space-x-3 w-full">
+                        <div class="w-8 h-8 rounded-full skeleton shrink-0"></div>
+                        <div class="space-y-1.5 w-full">
+                            <div class="w-24 h-4 rounded skeleton"></div>
+                            <div class="w-36 h-3 rounded skeleton"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 flex items-center justify-between shadow-sm">
+                    <div class="flex items-center space-x-3 w-full">
+                        <div class="w-8 h-8 rounded-full skeleton shrink-0"></div>
+                        <div class="space-y-1.5 w-full">
+                            <div class="w-20 h-4 rounded skeleton"></div>
+                            <div class="w-28 h-3 rounded skeleton"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 點擊特定日期未下載時的提示畫面 -->
+            <div id="not-downloaded-view" class="hidden bg-white border border-slate-100 rounded-3xl p-8 text-center space-y-4 shadow-sm">
+                <div class="text-4xl">📥</div>
+                <h4 id="not-downloaded-title" class="font-extrabold text-slate-800 text-base">此日期數據尚未載入</h4>
+                <p class="text-xs text-slate-500 leading-relaxed px-4">證交所開放數據無 CORS 限制，點擊下方按鈕將立即透過緩存通道抓取並分析此日數據。</p>
+                <button onclick="downloadActiveDate()" class="tap-feedback w-full py-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-2xl transition-colors shadow-sm">
+                    🚀 立即抓取該日數據
+                </button>
+            </div>
+
+            <!-- 無資料/週末提示 -->
+            <div id="empty-view" class="hidden bg-white rounded-3xl p-10 text-center space-y-2 border border-slate-100 shadow-sm">
+                <span class="text-3xl">📭</span>
+                <p class="text-xs font-extrabold text-slate-500">該交易日尚無大資金數據</p>
+                <p class="text-[11px] text-slate-400 leading-relaxed">可能該日為週末、國定假日或證交所尚未結算上傳。請點擊其他日期查看。</p>
+            </div>
+
+            <!-- 實際列表容器 -->
+            <div id="stock-list" class="space-y-2.5">
+                <!-- 動態注入 -->
+            </div>
+        </div>
+    </main>
+
+    <!-- 詳情彈出視窗 -->
+    <div id="details-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-end justify-center opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="absolute inset-0" onclick="closeDetails()"></div>
+        <div class="bg-white w-full max-w-md rounded-t-[2.5rem] shadow-2xl p-6 space-y-5 transform translate-y-full transition-transform duration-300 relative">
+            <div class="w-12 h-1 bg-slate-200 rounded-full mx-auto -mt-2 mb-2"></div>
+            
+            <div class="flex justify-between items-start">
+                <div>
+                    <div class="flex items-baseline space-x-2">
+                        <h3 id="modal-name" class="text-2xl font-black text-slate-900">--</h3>
+                        <span id="modal-code" class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded">--</span>
+                    </div>
+                    <p class="text-slate-500 text-xs mt-1">
+                        最新基準股價：<span id="modal-price" class="font-extrabold text-slate-800 text-sm">--</span> 元
+                    </p>
+                </div>
+                <button onclick="closeDetails()" class="tap-feedback p-2 rounded-full bg-slate-100 text-slate-400 hover:bg-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div class="bg-twRed-50 border border-twRed-100 p-4 rounded-2xl col-span-2">
+                    <p class="text-[11px] font-bold text-twRed-600/80">👑 三大法人合計買超</p>
+                    <div class="flex items-baseline space-x-1 mt-0.5">
+                        <span id="modal-total-amt" class="text-2xl font-black text-twRed-600">+0.00</span>
+                        <span class="text-xs font-bold text-twRed-600">億元</span>
+                    </div>
+                    <p id="modal-total-vol" class="text-[10px] text-twRed-500 mt-1 font-medium">--</p>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                    <p class="text-[11px] font-bold text-slate-500">🔥 外資主力買超</p>
+                    <div class="flex items-baseline space-x-0.5 mt-0.5">
+                        <span id="modal-foreign-amt" class="text-lg font-extrabold text-slate-800">+0.00</span>
+                        <span class="text-[9px] font-bold text-slate-500">億</span>
+                    </div>
+                    <p id="modal-foreign-vol" class="text-[9px] text-slate-400 mt-1">--</p>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                    <p class="text-[11px] font-bold text-slate-500">🥦 投信加碼買超</p>
+                    <div class="flex items-baseline space-x-0.5 mt-0.5">
+                        <span id="modal-trust-amt" class="text-lg font-extrabold text-slate-800">+0.00</span>
+                        <span class="text-[9px] font-bold text-slate-500">億</span>
+                    </div>
+                    <p id="modal-trust-vol" class="text-[9px] text-slate-400 mt-1">--</p>
+                </div>
+            </div>
+
+            <button onclick="copyStockSummary()" class="tap-feedback w-full py-3.5 bg-slate-900 text-white rounded-2xl text-xs font-bold hover:bg-slate-800 transition-colors flex justify-center items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <span>複製本檔籌碼摘要數據</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 烤麵包通知 -->
+    <div id="toast" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-950 text-white text-[11px] px-4 py-2.5 rounded-full shadow-lg opacity-0 pointer-events-none transition-opacity duration-300 z-50 flex items-center space-x-1.5">
+        <span id="toast-icon">✨</span>
+        <span id="toast-text">成功</span>
+    </div>
+
+    <script>
+        let currentTab = 'total'; // 'total', 'foreign', 'trust'
+        let tradingDays = []; // 過去 10 個交易日日期清單
+        let activeDate = 'accumulate'; // 當前選定日期，'accumulate' 表示「10日累計」
+        let dailyDatabase = {}; // 各日緩存： { '20260701': [ ...cleanedStockData ] }
+        let selectedStock = null;
+
+        // 初始化
+        window.onload = function() {
+            initTradingDays();
+            loadCacheFromStorage();
+            renderTimeline();
+            selectDate('accumulate'); // 預設顯示10日累計
+
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                renderCurrentData();
+            });
+        };
+
+        // 1. 自動產生過去 10 個工作天
+        function initTradingDays() {
+            tradingDays = [];
+            let current = new Date();
+            let count = 0;
+            // 往前回溯最多 25 日，過濾出 10 個工作天（週一至週五）
+            for (let i = 0; i < 25; i++) {
+                const dayOfWeek = current.getDay();
+                if (dayOfWeek !== 0 && dayOfWeek !== 6) { // 排除週六、週日
+                    const yyyy = current.getFullYear();
+                    const mm = String(current.getMonth() + 1).padStart(2, '0');
+                    const dd = String(current.getDate()).padStart(2, '0');
+                    const formattedDate = `${yyyy}${mm}${dd}`;
+                    const displayDate = `${mm}/${dd}`;
+                    const weekDayStr = ['日', '一', '二', '三', '四', '五', '六'][dayOfWeek];
+                    
+                    tradingDays.push({
+                        dateStr: formattedDate,
+                        display: `${displayDate} (${weekDayStr})`
+                    });
+                    count++;
+                }
+                if (count >= 10) break;
+                current.setDate(current.getDate() - 1);
+            }
+        }
+
+        // 2. 載入本地緩存
+        function loadCacheFromStorage() {
+            try {
+                const rawCache = localStorage.getItem('TW_STOCK_RADAR_CACHE');
+                if (rawCache) {
+                    dailyDatabase = JSON.parse(rawCache);
+                    // 移除過期（不在10日清單內）的極舊緩存
+                    const validDates = new Set(tradingDays.map(d => d.dateStr));
+                    for (const dateKey in dailyDatabase) {
+                        if (!validDates.has(dateKey)) {
+                            delete dailyDatabase[dateKey];
+                        }
+                    }
+                    saveCacheToStorage();
+                }
+            } catch (e) {
+                console.warn("無法取得瀏覽器本地緩存", e);
+            }
+            updateCacheStatusLabel();
+        }
+
+        // 3. 儲存本地緩存
+        function saveCacheToStorage() {
+            try {
+                localStorage.setItem('TW_STOCK_RADAR_CACHE', JSON.stringify(dailyDatabase));
+            } catch (e) {
+                console.warn("儲存緩存失敗", e);
+            }
+            updateCacheStatusLabel();
+        }
+
+        function updateCacheStatusLabel() {
+            const cachedCount = Object.keys(dailyDatabase).length;
+            document.getElementById('cache-status').textContent = `已載入 ${cachedCount}/10 天數據`;
+        }
+
+        // 4. 渲染頂部時間軸
+        function renderTimeline() {
+            const timeline = document.getElementById('calendar-timeline');
+            // 清理除了第一顆「10日累計」以外的所有按鈕
+            const accumBtn = document.getElementById('date-accumulate');
+            timeline.innerHTML = '';
+            timeline.appendChild(accumBtn);
+
+            tradingDays.forEach(day => {
+                const btn = document.createElement('button');
+                btn.id = `date-${day.dateStr}`;
+                btn.onclick = () => selectDate(day.dateStr);
+                
+                const isCached = dailyDatabase[day.dateStr] ? true : false;
+                const statusDot = isCached ? '<span class="inline-block w-1.5 h-1.5 bg-twGreen-500 rounded-full ml-1"></span>' : '';
+
+                btn.className = "tap-feedback shrink-0 px-4 py-2.5 rounded-2xl text-center border transition-all text-slate-600 border-slate-200 bg-white shadow-sm hover:border-slate-400";
+                btn.innerHTML = `
+                    <div class="text-[9px] font-semibold text-slate-400 flex items-center justify-center">
+                        交易日${statusDot}
+                    </div>
+                    <div class="text-xs font-bold mt-0.5">${day.display}</div>
+                `;
+                timeline.appendChild(btn);
+            });
+        }
+
+        // 5. 選取特定日期
+        function selectDate(dateKey) {
+            activeDate = dateKey;
+            
+            // 重新整理日曆選定樣式
+            const allButtons = document.querySelectorAll('#calendar-timeline button');
+            allButtons.forEach(btn => {
+                if (btn.id === `date-${dateKey}`) {
+                    btn.className = "tap-feedback shrink-0 px-4 py-2.5 rounded-2xl text-center border transition-all shadow-md bg-slate-900 border-slate-900 text-white font-bold";
+                } else {
+                    const isAccum = btn.id === 'date-accumulate';
+                    if (isAccum) {
+                        btn.className = "tap-feedback shrink-0 px-4 py-2.5 rounded-2xl text-center border transition-all shadow-sm bg-slate-700 border-slate-700 text-white font-bold";
+                    } else {
+                        btn.className = "tap-feedback shrink-0 px-4 py-2.5 rounded-2xl text-center border transition-all text-slate-600 border-slate-200 bg-white shadow-sm hover:border-slate-300";
+                    }
+                }
+            });
+
+            // 更新面板描述
+            updateStatusPanel();
+            
+            // 渲染資料
+            renderCurrentData();
+        }
+
+        // 更新狀態看板
+        function updateStatusPanel() {
+            const panelTitle = document.getElementById('panel-title');
+            const panelDesc = document.getElementById('panel-desc');
+            const panelFooter = document.getElementById('panel-footer');
+
+            if (activeDate === 'accumulate') {
+                panelTitle.textContent = "🔥 波段精華：10日籌碼合計";
+                panelDesc.textContent = "系統已加總所有下載完畢的日期，自動計算法人在此波段默默吃貨與連續買超的金額總和！";
+            } else {
+                const targetDay = tradingDays.find(d => d.dateStr === activeDate);
+                const isCached = dailyDatabase[activeDate] ? true : false;
+                panelTitle.textContent = `📅 觀看單日：${targetDay ? targetDay.display : activeDate}`;
+                if (isCached) {
+                    panelDesc.textContent = "此日期數據已成功緩存。三大法人大資金個股在當日的實際布局比率如下方清單。";
+                } else {
+                    panelDesc.textContent = "當日資料尚未下載。請點擊下方「立即抓取」按鈕或點選右上角「一鍵掃描10日」。";
+                }
+            }
+        }
+
+        // 6. 核心：切換買超主力 Tab
+        function switchTab(tab) {
+            currentTab = tab;
+            const tabs = ['total', 'foreign', 'trust'];
+            tabs.forEach(t => {
+                const el = document.getElementById(`tab-${t}`);
+                if (t === tab) {
+                    el.className = "tap-feedback flex-1 py-2 text-xs font-bold text-center rounded-xl transition-all bg-white text-slate-900 shadow-sm";
+                } else {
+                    el.className = "tap-feedback flex-1 py-2 text-xs font-bold text-center rounded-xl text-slate-500 hover:text-slate-800 transition-all";
+                }
+            });
+            renderCurrentData();
+        }
+
+        // 7. 渲染目前選定內容 (包含單日排行與10日累計)
+        function renderCurrentData() {
+            const container = document.getElementById('stock-list');
+            const emptyView = document.getElementById('empty-view');
+            const notDownloadedView = document.getElementById('not-downloaded-view');
+            const countLabel = document.getElementById('list-count');
+            const listTitle = document.getElementById('list-title');
+
+            container.innerHTML = '';
+            emptyView.classList.add('hidden');
+            notDownloadedView.classList.add('hidden');
+
+            let renderList = [];
+
+            // 判斷要讀取單日還是10日累計
+            if (activeDate === 'accumulate') {
+                listTitle.textContent = "10日累計大資金排行榜 (金額前 20 名)";
+                renderList = calculateAccumulatedData();
+            } else {
+                listTitle.textContent = "當日單日大資金排行榜 (金額前 15 名)";
+                // 如果是單日，但該日尚未下載
+                if (!dailyDatabase[activeDate]) {
+                    notDownloadedView.classList.remove('hidden');
+                    countLabel.textContent = "待下載";
+                    return;
+                }
+                renderList = [...dailyDatabase[activeDate]];
+            }
+
+            // 排序與關鍵字篩選
+            let sortField = 'totalAmt';
+            if (currentTab === 'foreign') sortField = 'foreignAmt';
+            if (currentTab === 'trust') sortField = 'trustAmt';
+
+            // 僅篩選買超大於 0 的個股，並由大到小排序
+            renderList = renderList.filter(item => item[sortField] > 0);
+            renderList.sort((a, b) => b[sortField] - a[sortField]);
+
+            // 關鍵字搜尋
+            const keyword = document.getElementById('search-input').value.trim().toLowerCase();
+            if (keyword !== '') {
+                renderList = renderList.filter(item => 
+                    item.code.toLowerCase().includes(keyword) || 
+                    item.name.toLowerCase().includes(keyword)
+                );
+            }
+
+            // 限制輸出長度
+            const limit = activeDate === 'accumulate' ? 20 : 15;
+            const displayList = renderList.slice(0, limit);
+
+            countLabel.textContent = `共 ${displayList.length} 筆`;
+
+            if (displayList.length === 0) {
+                emptyView.classList.remove('hidden');
+                return;
+            }
+
+            // 找出最大買超金額作能量條百分比
+            const maxAmt = displayList[0][sortField];
+
+            displayList.forEach((item, index) => {
+                const amt = item[sortField];
+                const shares = currentTab === 'total' ? item.totalShares : (currentTab === 'foreign' ? item.foreignShares : item.trustShares);
+                const percentage = Math.min(100, Math.max(5, (amt / maxAmt) * 100));
+
+                const card = document.createElement('div');
+                card.className = "tap-feedback bg-white p-4 rounded-2xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow transition-all cursor-pointer relative overflow-hidden";
+                card.onclick = () => showDetails(item);
+
+                card.innerHTML = `
+                    <div class="flex items-center space-x-3 z-10">
+                        <div class="w-7 h-7 rounded-full bg-slate-50 flex items-center justify-center font-black text-xs text-slate-400 border border-slate-100">
+                            ${index + 1}
+                        </div>
+                        <div>
+                            <div class="flex items-baseline space-x-1.5">
+                                <span class="font-extrabold text-slate-900 text-sm">${item.name}</span>
+                                <span class="text-[10px] font-bold text-slate-400">${item.code}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 mt-0.5 flex items-center space-x-1.5">
+                                <span>當期股價: <b class="text-slate-700">${item.price}</b> 元</span>
+                                <span>•</span>
+                                <span>累計: ${Math.round(shares).toLocaleString()} 張</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-right z-10 flex flex-col items-end">
+                        <div class="text-twRed-600 font-extrabold text-sm tracking-tight">
+                            +${amt.toFixed(2)} <span class="text-[9px] font-bold">億</span>
+                        </div>
+                        <div class="w-12 h-1 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
+                            <div class="h-full bg-twRed-500 rounded-full" style="width: ${percentage}%"></div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // 計算 10 日累計籌碼
+        function calculateAccumulatedData() {
+            const accMap = {};
+            const cachedDays = Object.keys(dailyDatabase);
+
+            if (cachedDays.length === 0) return [];
+
+            cachedDays.forEach(dateKey => {
+                const dayList = dailyDatabase[dateKey];
+                dayList.forEach(stock => {
+                    if (!accMap[stock.code]) {
+                        accMap[stock.code] = {
+                            code: stock.code,
+                            name: stock.name,
+                            price: stock.price, // 使用最近一天的價格作基準
+                            totalShares: 0,
+                            foreignShares: 0,
+                            trustShares: 0,
+                            totalAmt: 0,
+                            foreignAmt: 0,
+                            trustAmt: 0
+                        };
+                    }
+                    accMap[stock.code].price = stock.price; // 持續更新為最新
+                    accMap[stock.code].totalShares += stock.totalShares;
+                    accMap[stock.code].foreignShares += stock.foreignShares;
+                    accMap[stock.code].trustShares += stock.trustShares;
+                    accMap[stock.code].totalAmt += stock.totalAmt;
+                    accMap[stock.code].foreignAmt += stock.foreignAmt;
+                    accMap[stock.code].trustAmt += stock.trustAmt;
+                });
+            });
+
+            return Object.values(accMap);
+        }
+
+        // 8. 獲取單日證交所數據並處理
+        async function fetchDailyStockData(dateStr) {
+            // 三大法人(T86)與收盤行情(MI_INDEX)的網頁 JSON API
+            const t86Url = `https://www.twse.com.tw/rwd/zh/fund/T86?date=${dateStr}&response=json`;
+            const indexUrl = `https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date=${dateStr}&type=ALLBUT0999&response=json`;
+
+            // 使用 CORS 代理
+            const proxyFetch = async (url) => {
+                const wrappedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                const response = await fetch(wrappedUrl, { signal: AbortSignal.timeout(9000) });
+                if (response.ok) {
+                    return await response.json();
+                }
+                return null;
+            };
+
+            try {
+                const [t86Res, indexRes] = await Promise.all([
+                    proxyFetch(t86Url),
+                    proxyFetch(indexUrl)
+                ]);
+
+                if (!t86Res || t86Res.stat !== 'OK' || !indexRes || indexRes.stat !== 'OK') {
+                    return null;
+                }
+
+                // 開始解析
+                // 1. 收盤價映射表
+                const priceMap = {};
+                // MI_INDEX 桌子結構：通常"每日收盤行情"在 tables 的最末端或特定 tables，我們需要動態比對欄位名稱
+                const mainTable = indexRes.tables ? indexRes.tables.find(t => t.fields && t.fields.includes("收盤價")) : null;
+                if (mainTable && mainTable.data) {
+                    const codeIdx = mainTable.fields.indexOf("證券代號");
+                    const priceIdx = mainTable.fields.indexOf("收盤價");
+                    mainTable.data.forEach(row => {
+                        const code = row[codeIdx];
+                        let rawPrice = row[priceIdx].replace(/,/g, '');
+                        let p = parseFloat(rawPrice);
+                        if (!isNaN(p) && p > 0) {
+                            priceMap[code] = p;
+                        }
+                    });
+                }
+
+                // 2. 解析法人 T86 數據
+                if (!t86Res.data || !t86Res.fields) return null;
+                const f = t86Res.fields;
+                const codeIdx = f.indexOf("證券代號");
+                const nameIdx = f.indexOf("證券名稱");
+                
+                // 尋找各法人欄位（各年度欄位文字可能略有不同）
+                const foreignIdx = f.findIndex(el => el.includes("外陸資買賣超股數") || el.includes("外資買賣超股數"));
+                const trustIdx = f.findIndex(el => el.includes("投信買賣超股數"));
+                const totalIdx = f.findIndex(el => el.includes("三大法人買賣超股數"));
+
+                if (codeIdx === -1 || foreignIdx === -1) return null;
+
+                const dayCleanedData = t86Res.data.map(row => {
+                    const code = row[codeIdx];
+                    const name = row[nameIdx];
+                    const price = priceMap[code] || 0;
+
+                    // 三大法人股數 (轉為張數 = 除以 1000)
+                    const foreignShares = parseFloat(row[foreignIdx].replace(/,/g, '')) / 1000 || 0;
+                    const trustShares = parseFloat(row[trustIdx].replace(/,/g, '')) / 1000 || 0;
+                    const totalShares = parseFloat(row[totalIdx].replace(/,/g, '')) / 1000 || 0;
+
+                    // 買超金額 = 張數 * 1000 * 收盤價 / 1億 = 張數 * 收盤價 / 100,000
+                    const foreignAmt = price > 0 ? (foreignShares * price) / 100000 : 0;
+                    const trustAmt = price > 0 ? (trustShares * price) / 100000 : 0;
+                    const totalAmt = price > 0 ? (totalShares * price) / 100000 : 0;
+
+                    return {
+                        code,
+                        name,
+                        price,
+                        foreignShares,
+                        trustShares,
+                        totalShares,
+                        foreignAmt,
+                        trustAmt,
+                        totalAmt
+                    };
+                }).filter(stock => stock.price > 0 && (stock.foreignAmt > 0 || stock.trustAmt > 0 || stock.totalAmt > 0)); // 篩選出有成交且買超大於零的
+
+                // 精簡化緩存：為了防止 LocalStorage 空間爆炸，每日只存前 100 大買超股，這已足夠追蹤
+                dayCleanedData.sort((a, b) => b.totalAmt - a.totalAmt);
+                return dayCleanedData.slice(0, 100);
+
+            } catch (err) {
+                console.error(`下載 ${dateStr} 籌碼出錯: `, err);
+                return null;
+            }
+        }
+
+        // 下載目前選定的未下載交易日數據
+        async function downloadActiveDate() {
+            if (activeDate === 'accumulate') return;
+            
+            showLoading(true);
+            const data = await fetchDailyStockData(activeDate);
+            showLoading(false);
+
+            if (data) {
+                dailyDatabase[activeDate] = data;
+                saveCacheToStorage();
+                renderTimeline(); // 更新狀態小圓點
+                selectDate(activeDate); // 重新選擇並渲染
+                showToast("下載成功！數據已存入緩存", "✅");
+            } else {
+                showToast("抓取失敗，今天可能是休市日，請查看其他日期", "❌");
+            }
+        }
+
+        // 9. 超強功能：「一鍵下載 10 日」批次掃描
+        async function batchDownloadAll() {
+            const btn = document.getElementById('btn-batch');
+            const originalText = btn.innerHTML;
+            
+            // 計算尚未緩存的日期有哪些
+            const pendingDates = tradingDays.filter(day => !dailyDatabase[day.dateStr]);
+            
+            if (pendingDates.length === 0) {
+                showToast("所有 10 日資料都已經緩存囉！", "🎉");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.className = "text-[11px] font-bold bg-slate-400 text-white px-3 py-1.5 rounded-full flex items-center space-x-1 shadow-sm";
+            
+            let successCount = 0;
+            showLoading(true);
+
+            for (let i = 0; i < pendingDates.length; i++) {
+                const target = pendingDates[i];
+                btn.innerHTML = `<span>⏳ 正在下載 ${target.display} (${i+1}/${pendingDates.length})</span>`;
+                
+                // 為了防止被證交所防刷限流，每次發起請求間隔 1.5 秒
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+
+                const data = await fetchDailyStockData(target.dateStr);
+                if (data) {
+                    dailyDatabase[target.dateStr] = data;
+                    saveCacheToStorage();
+                    successCount++;
+                }
+            }
+
+            showLoading(false);
+            btn.disabled = false;
+            btn.className = "tap-feedback text-[11px] font-bold bg-slate-900 text-white px-3 py-1.5 rounded-full flex items-center space-x-1 shadow-sm";
+            btn.innerHTML = originalText;
+
+            renderTimeline();
+            selectDate(activeDate); // 重新渲染當下畫面
+
+            if (successCount > 0) {
+                showToast(`掃描完成！成功更新 ${successCount} 天籌碼！`, "🚀");
+            } else {
+                showToast("掃描完畢，未發現可下載的最新數據。", "⚠️");
+            }
+        }
+
+        // 顯示詳情 Drawer
+        function showDetails(stock) {
+            selectedStock = stock;
+            document.getElementById('modal-name').textContent = stock.name;
+            document.getElementById('modal-code').textContent = stock.code;
+            document.getElementById('modal-price').textContent = stock.price;
+
+            document.getElementById('modal-total-amt').textContent = `+${stock.totalAmt.toFixed(2)}`;
+            document.getElementById('modal-total-vol').textContent = `估算累計買超：${Math.round(stock.totalShares).toLocaleString()} 張`;
+
+            document.getElementById('modal-foreign-amt').textContent = `+${stock.foreignAmt.toFixed(2)}`;
+            document.getElementById('modal-foreign-vol').textContent = `${Math.round(stock.foreignShares).toLocaleString()} 張`;
+
+            document.getElementById('modal-trust-amt').textContent = `+${stock.trustAmt.toFixed(2)}`;
+            document.getElementById('modal-trust-vol').textContent = `${Math.round(stock.trustShares).toLocaleString()} 張`;
+
+            const modal = document.getElementById('details-modal');
+            const drawer = modal.querySelector('div:nth-child(2)');
+            
+            modal.classList.remove('pointer-events-none', 'opacity-0');
+            modal.classList.add('opacity-100');
+            drawer.classList.remove('translate-y-full');
+            drawer.classList.add('translate-y-0');
+        }
+
+        function closeDetails() {
+            selectedStock = null;
+            const modal = document.getElementById('details-modal');
+            const drawer = modal.querySelector('div:nth-child(2)');
+            
+            modal.classList.add('pointer-events-none', 'opacity-0');
+            modal.classList.remove('opacity-100');
+            drawer.classList.add('translate-y-full');
+            drawer.classList.remove('translate-y-0');
+        }
+
+        // 複製摘要
+        function copyStockSummary() {
+            if (!selectedStock) return;
+            const state = activeDate === 'accumulate' ? '📊 近10日大資金累計吃貨' : `📅 單日籌碼 (${activeDate})`;
+            const text = 
+`${state}
+🔥 標的：${selectedStock.name} (${selectedStock.code})
+💰 股價基準：${selectedStock.price} 元
+👑 三大法人合計買超：+${selectedStock.totalAmt.toFixed(2)} 億元 (${Math.round(selectedStock.totalShares).toLocaleString()}張)
+🔹 外資主力買超：+${selectedStock.foreignAmt.toFixed(2)} 億元 (${Math.round(selectedStock.foreignShares).toLocaleString()}張)
+🔹 投信加碼買超：+${selectedStock.trustAmt.toFixed(2)} 億元 (${Math.round(selectedStock.trustShares).toLocaleString()}張)
+💡 點選籌碼雷達查看最新連續加碼標的！`;
+
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast("已成功複製此個股多日籌碼！", "📋");
+                } else {
+                    showToast("複製失敗，請手動複製", "⚠️");
+                }
+            } catch (err) {
+                showToast("瀏覽器不支持快速複製", "⚠️");
+            }
+            document.body.removeChild(textArea);
+        }
+
+        function showToast(text, icon = "✨") {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-text').textContent = text;
+            document.getElementById('toast-icon').textContent = icon;
+            
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            toast.classList.add('opacity-100');
+            
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'pointer-events-none');
+                toast.classList.remove('opacity-100');
+            }, 3000);
+        }
+
+        function showLoading(isLoading) {
+            const loadingView = document.getElementById('loading-view');
+            if (isLoading) {
+                loadingView.classList.remove('hidden');
+                document.getElementById('stock-list').classList.add('hidden');
+            } else {
+                loadingView.classList.add('hidden');
+                document.getElementById('stock-list').classList.remove('remove');
+            }
+        }
+    </script>
+</body>
+</html>
+
+```
